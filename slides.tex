@@ -188,6 +188,51 @@ cmd.exe 由「已是 High」的 slui.exe 啟動，因此一出生就是 High。\
 \end{frame}
 
 % ------------------------------------------------------------
+\begin{frame}[fragile]{原始紀錄檔規模與篩選方式}
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\textbf{\small 原始日誌規模}
+\begin{table}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+檔案 & 來源 & 大小 & 筆數 \\
+\midrule
+\texttt{sysmon.log}  & Sysmon EVTX   & 7.3 KB & 150 \\
+\texttt{procmon.CSV} & Procmon Trace & 3.9 MB & 23{,}938 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{column}
+\begin{column}{0.5\textwidth}
+\textbf{\small Procmon 篩選（GUI Filter）}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Column   : Process Name
+Relation : is
+Value    : Akagi64.exe
+Action   : Include
+\end{lstlisting}
+\end{column}
+\end{columns}
+
+\vspace{-0.5em}
+\textbf{\small Sysmon 篩選（PowerShell 讀 EVTX，鎖定時間區間與攻擊鏈關鍵字）}
+\begin{lstlisting}[style=dark,basicstyle=\scriptsize\ttfamily\color{codefg}]
+Get-WinEvent -LogName "Microsoft-Windows-Sysmon/Operational" |
+  Where-Object {
+    $_.TimeCreated -gt [datetime]"2026-04-22 01:10:44" -and
+    $_.TimeCreated -lt [datetime]"2026-04-22 01:12:44" -and
+    ($_.Message -like "*Akagi*" -or
+     $_.Message -like "*slui*"  -or
+     $_.Message -like "*sandcat*")
+  } | Select-Object TimeCreated, Id, Message | Format-List |
+  Out-File "C:\Users\Public\sysmon_log.txt" -Encoding UTF8
+\end{lstlisting}
+\end{frame}
+
+% ------------------------------------------------------------
 \begin{frame}[fragile]{Sysmon 日誌分析 - Stage 1: Agent 啟動 (01:09:44)}
 \begin{columns}[T]
 \begin{column}{0.65\textwidth}
