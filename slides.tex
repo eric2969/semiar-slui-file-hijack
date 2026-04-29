@@ -125,7 +125,8 @@
 \textbf{為何自動以 High Integrity 執行？}
 \begin{itemize}
   \item Manifest 含 \texttt{autoElevate=true}
-  \item 位於 System32、有 Microsoft 簽章 $\rightarrow$ 在 UAC 白名單
+  \item 位於 System32、有 Microsoft 簽章 $\rightarrow$ 在 UAC 白名單(不會跳UAC確認)
+  \item consent.exe 會負責確認程式是否被授權。若沒有，則會 負責在執行需管理員權限的操作時彈出授權視窗
   \item 符合條件者 consent.exe \textbf{自動放行}，不顯示 UAC 彈窗
 \end{itemize}
 
